@@ -3,4 +3,4 @@ Pipeline do Azure DevOps para automação de testes de integração (com Azurite
 
 Projeto que serviu de base para a criação deste Pipeline:
 
-https://github.com/renatogroffe/AzureDevOps-AzureFunctions3x-DotNet5-IntegrationTests_Acoes
+https://github.com/renatogroffe/DotNet5-AzureFunctions-AzureStorageQueue-Swagger-SQLServer-SQLite-IntegrationTests_Acoes
