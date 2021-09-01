@@ -1,0 +1,115 @@
+trigger:
+  - main
+  
+resources:
+  containers:
+    - container: azurite
+      image: mcr.microsoft.com/azure-storage/azurite
+      networks: 
+      - testes
+      ports:
+        - 10001:10001
+        - 10002:10002
+        - 10003:10003
+
+variables:
+  buildConfiguration: 'Release'
+  vmImageName: 'ubuntu-latest'
+  artifactFunctionApp: 'functionAppProcessarAcoes'
+  functionAppProject: '**/FunctionAppProcessarAcoes.csproj'
+  pathFunctionApp: './FunctionAppProcessarAcoes'
+  fileLogExecutionFunctionApp: 'log-execucao-functionapp.txt'
+  testProject: '**/FunctionAppProcessarAcoes.IntegrationTests.csproj'
+  dirProjectMigrations: './FunctionAppProcessarAcoes.Migrations.SQLite/BaseAcoes/'
+  BaseAcoes: 'Data Source=$(Agent.TempDirectory)/baseacoes.db'
+
+stages:
+- stage: Tests
+  displayName: Teste da Function App
+  jobs:
+  - job: Tests
+    displayName: Teste da Function App em .NET
+    pool:
+      vmImage: $(vmImageName)
+    services:
+      azurite: azurite
+    steps:
+    - script: docker container ls
+      displayName: Exibir containers em execução
+    - script: |
+        npm i azure-functions-core-tools@3
+        npx func
+      displayName: Instalar Azure Functions Core Tools v3
+    - script: |
+        echo '**** String de conexão da base de dados do SQLite que será criada ****'
+        echo $(BaseAcoes)
+        cd $(dirProjectMigrations)
+        dotnet run "$(BaseAcoes)"
+      displayName: Executar projeto com as Migrations do SQLite
+    - script: |
+        cd $(pathFunctionApp)
+        dotnet build --configuration Debug
+        nohup npx func start > $(fileLogExecutionFunctionApp) 2>&1 &
+        echo 'Aguardando a inicialização da Function App...'
+        sleep 25s
+      displayName: Executar a Function App
+      env:
+        AzureWebJobsStorage: 'UseDevelopmentStorage=true;'
+        TecnologiaBD: 'SQLite'
+        BaseAcoes_Connection: $(BaseAcoes)
+    - task: DotNetCoreCLI@2
+      inputs:
+        command: 'test'
+        projects: '$(testProject)'
+      displayName: Executar testes da Function App
+    - script: |
+        cd $(pathFunctionApp)
+        cat $(fileLogExecutionFunctionApp)
+      condition: Always()
+      displayName: Exibir log de execução da Function App
+
+- stage: Build
+  displayName: Build da Function App
+  dependsOn: Tests
+  jobs:
+  - job: Build
+    displayName: Build da Function App em .NET
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    - task: DotNetCoreCLI@2
+      displayName: Build + Publish gerando Artifact
+      inputs:
+        command: 'publish'
+        publishWebProjects: false
+        projects: '$(functionAppProject)'
+        arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)'
+    - task: PublishPipelineArtifact@1
+      displayName: Publish do Artifact
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)' 
+        artifactName: $(artifactFunctionApp)
+
+- stage: Deployment
+  displayName: Deployment da Function App em Linux
+  dependsOn: Build
+  jobs:
+  - job: Deployment
+    displayName: Deployment da Function App no Azure
+    pool:
+      vmImage: $(vmImageName)
+    steps:
+    - task: DownloadPipelineArtifact@2
+      displayName: Download do Artifact gerado no stage de Build
+      inputs:
+        buildType: 'current'
+        artifactName: $(artifactFunctionApp)
+        targetPath: '$(System.DefaultWorkingDirectory)/publish'
+    - task: AzureFunctionApp@1
+      displayName: Deployment da Function App no Azure em Linux
+      inputs:
+        azureSubscription: 'AZURE SUBSCRIPTION'
+        appType: 'functionAppLinux'
+        appName: 'groffeacoes'
+        package: '$(System.DefaultWorkingDirectory)/**/*.zip'
+        appSettings: '-FUNCTIONS_WORKER_RUNTIME "dotnet-isolated"'
