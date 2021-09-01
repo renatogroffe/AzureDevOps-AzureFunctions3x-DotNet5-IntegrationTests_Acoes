@@ -1,0 +1,1 @@
+# AzureDevOps-AzureFunctions3x-DotNet5-IntegrationTests_Acoes
